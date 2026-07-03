@@ -2,73 +2,66 @@
 
 > **给定一道数学建模题，自动生成符合国赛/CUMCM 规范的 Word 论文（.docx）。**
 
-## 核心思路
+## 项目结构
 
 ```
-数学建模题目 → Python 建模求解 → Markdown + LaTeX 写论文 → Pandoc 转 Word → 后处理格式化
+mathmodel/
+├── input/                  # 每次任务替换的输入
+│   ├── question.md         # 题目描述与数据
+│   ├── todo.md             # Agent 专属指令
+│   └── *.xlsx / *.csv      # 附件数据
+├── output/                 # 每次任务生成的输出 (.gitignore)
+│   ├── paper.md            # 论文 Markdown
+│   ├── paper.docx          # 最终 Word 论文
+│   ├── model.py            # 建模求解代码
+│   └── fig*.png            # 图表
+├── templates/              # 可复用模板
+│   ├── reference.docx      # Pandoc 样式模板
+│   ├── PAPER_SPEC.md       # 格式规范（字号/字体/三线表）
+│   └── paper_skeleton.md   # 论文骨架
+├── scripts/                # 基础设施脚本
+│   ├── convert.bat         # 一键转换 + 后处理
+│   ├── fix_reference.py    # 样式模板构建
+│   └── postprocess_appendix.py  # 三线表/页码/样式修复
+├── wiki.md                 # Agent 通用工作流文档
+└── README.md               # 本文件
 ```
 
-- **内容与格式分离**：用 Markdown + LaTeX 写论文内容，用 `reference.docx` + 后处理脚本管格式
-- **全自动后处理**：三线表、页脚页码、样式修复、代码图片全部自动完成
-- **Agent 友好**：完整工作流文档（[wiki.md](wiki.md)），可供 AI Agent 学习复用
+- **`input/`** 放题目和数据——每次任务唯一要改的
+- **`output/`** 放所有生成物——gitignore，不留历史
+- **`templates/`** 和 **`scripts/`** 是基础设施——跨任务复用
 
 ## 快速开始
 
-### 1. 准备
+### 1. 安装依赖
 
 ```bash
-# 安装 Pandoc（Windows）
 winget install JohnMacFarlane.Pandoc
-
-# 安装 Python 依赖
-pip install python-docx Pillow numpy scipy matplotlib scikit-learn pygments
+pip install python-docx Pillow numpy scipy matplotlib scikit-learn
 ```
 
-### 2. 填入题目
+### 2. 准备题目
 
-- `README.md`（本文件）— 项目简介
-- `PAPER_SPEC.md` — 论文格式规范与修改清单
-- 编写 `model.py` — 建模求解 + 出图
+把题目写入 `input/question.md`，数据文件放入 `input/`，Agent 指令写入 `input/todo.md`。
 
-### 3. 写论文
+### 3. Agent 执行
 
-编辑 `paper.md`，按模板填充内容。
+Agent 按 `wiki.md` 工作流自动完成：建模 → 论文 → 图表 → Word 转换 → 后处理。
 
-### 4. 生成
+### 4. 手动生成
 
 ```bash
-# 一键生成
-convert.bat
-
-# 或手动
-pandoc paper.md -o paper.docx --reference-doc=reference.docx --mathml --syntax-highlighting=pygments
-python postprocess_tables.py
+# 从项目根目录运行
+scripts\convert.bat
 ```
 
-## 文件说明
+## 复用到新题目
 
-| 文件 | 说明 |
-|:---|:---|
-| `paper.md` | 论文源文件（Markdown + LaTeX），编辑此文件写论文 |
-| `reference.docx` | Pandoc 样式模板（字体/字号/行距/页边距） |
-| `convert.bat` | 一键转换 + 后处理 |
-| `model.py` | 建模求解代码（需自行编写） |
-| `wiki.md` | Agent 通用工作流完整文档 |
-| `PAPER_SPEC.md` | 论文格式规范模板 |
-| `fix_reference.py` | 样式模板构建脚本 |
-| `fix_table_style.py` | 三线表样式定义 |
-| `fix_code_style.py` | 代码块样式定义 |
-| `gen_code_images.py` | 代码渲染为 PNG 图片 |
-| `postprocess_tables.py` | 表格后处理（备用） |
-
-## 特性
-
-- **三线表**：自动生成顶线(1.5pt)+表头下线(0.75pt)+底线(1.5pt)，无竖线
-- **LaTeX 公式**：`$...$` / `$$...$$` → Word 原生 OMML 可编辑公式
-- **代码图片**：附录代码以清晰 PNG 嵌入，避免 Word 中字母分裂
-- **页码**：自动添加页脚居中页码
-- **样式修复**：自动修复无样式段落、标题蓝色、页面空白等问题
-- **中英文字体分离**：正文宋体+Times New Roman，标题黑体+Times New Roman
+1. 清空 `output/`，把新题目写入 `input/question.md`
+2. 把 Agent 指令写入 `input/todo.md`
+3. 编写 `output/model.py`（建模求解 + 生成图表）
+4. Agent 按工作流将论文写入 `output/paper.md`
+5. 运行 `scripts\convert.bat` 生成 `output/paper.docx`
 
 ## 论文格式（默认）
 
@@ -80,14 +73,7 @@ python postprocess_tables.py
 | 正文 | 12pt | 宋体 | Times New Roman | 否 | 两端 | 1.25x |
 | 图表标题 | 10.5pt | 宋体 | Times New Roman | 是 | 居中 | 1.25x |
 
-A4 纸，上下左右 ≥2.5cm，左侧装订。格式可按需在 `fix_reference.py` 中调整。
-
-## 复用到新题目
-
-1. 将题目数据写入 `PAPER_SPEC.md`
-2. 编写 `model.py`（建模 + 出图）
-3. 编辑 `paper.md`（论文内容）
-4. 运行 `convert.bat` 生成 `paper.docx`
+A4 纸，上下左右 ≥2.5cm。格式可在 `scripts/fix_reference.py` 中调整。
 
 ## License
 

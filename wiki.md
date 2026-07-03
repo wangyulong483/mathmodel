@@ -1,6 +1,6 @@
 # Agent 通用工作流：数学建模题目 → Word 论文
 
-> **用途**：给定任意数学建模题目（`README.md` + `todo.md` + 可选竞赛模板 `.docx`），按此工作流自动生成符合竞赛规范的 Word 论文。
+> **用途**：给定任意数学建模题目（`question.md` + `todo.md` + 可选竞赛模板 `.docx`），按此工作流自动生成符合竞赛规范的 Word 论文。
 >
 > **适用范围**：全国大学生数学建模竞赛（CUMCM）、校赛、暑期培训作业等各类数学建模论文。
 >
@@ -11,14 +11,14 @@
 ## 一、工作流总览
 
 ```
-题目(README.md) + 格式规范(todo.md) + [竞赛模板.docx]
+input/question.md + input/todo.md + templates/PAPER_SPEC.md（格式规范）
         │
-        ├── [1] 理解需求 ── 读输入 + EXA MCP 搜索最优方案
-        ├── [2] 建模求解 ── 写 Python 代码 → 运行验证 → 生成图表
-        ├── [3] 撰写论文 ── Markdown + LaTeX 公式 → paper.md
-        ├── [4] 构建模板 ── 分析竞赛模板 → 生成 reference.docx
+        ├── [1] 理解需求 ── 读 input/ + EXA MCP 搜索最优方案
+        ├── [2] 建模求解 ── 写 output/model.py → 运行验证 → 生成图表到 output/
+        ├── [3] 撰写论文 ── Markdown + LaTeX 公式 → output/paper.md
+        ├── [4] 构建模板 ── 分析竞赛模板 → 更新 templates/reference.docx
         ├── [5] Pandoc ── Markdown → DOCX（含公式 OMML 转换）
-        ├── [6] 后处理 ── 三线表/页码/样式修复/代码图片
+        ├── [6] 后处理 ── scripts/ 三线表/页码/样式修复/代码图片
         └── [7] 审查迭代 ── 多 Agent 并行检查 + EXA MCP 修正
 ```
 
@@ -29,9 +29,11 @@
 ### 2.1 读输入
 
 ```
-Read README.md    → 题目背景、数据、具体问题列表
-Read todo.md      → 论文结构要求、格式规范、修改清单
-Glob **/*.docx    → 发现竞赛模板文件
+Read input/question.md  → 题目背景、数据、具体问题列表
+Read input/todo.md      → Agent 专属指令：用什么方法、写哪些内容、生成哪些图（针对本题）
+Read templates/PAPER_SPEC.md → 通用论文格式规范（字号/字体/三线表/页码，不随题目变化）
+Glob input/*.docx    → 发现竞赛模板文件（如有）
+Glob input/*.xlsx    → 发现附件数据文件
 ```
 
 ### 2.2 EXA MCP 搜索清单
@@ -83,7 +85,7 @@ plt.rcParams['savefig.dpi'] = 150
 plt.rcParams['savefig.bbox'] = 'tight'
 
 # ===== 0. 数据加载 =====
-# 从 README.md 提取，硬编码为 NumPy 数组
+# 从 question.md 提取数据，硬编码为 NumPy 数组
 
 # ===== 1. 模型定义 =====
 # 根据题目的数学方法：ODE / 优化目标函数 / 统计模型 / ...
@@ -368,7 +370,7 @@ for i, line in enumerate(code.split('\n')):
 | Agent | 职责 | 关键检查项 |
 |:---|:---|:---|
 | **格式审查** | EXA MCP 搜索最新规范 + 对比 DOCX styles.xml | 字号/字体/颜色/行距/页边距/页码 |
-| **内容审查** | 阅读 README/todo/paper.md | 数据正确性、模型逻辑、参数可靠性、参考文献 |
+| **内容审查** | 阅读 question.md/todo.md/paper.md | 数据正确性、模型逻辑、参数可靠性、参考文献 |
 | **渲染检查** | 解压 DOCX 检查 XML | 表格宽度/tcW、公式 OMML、无样式段落、图片嵌入 |
 
 ### 8.2 常见问题速查
@@ -429,12 +431,22 @@ for i, line in enumerate(code.split('\n')):
 
 ## 十、复用到新题目
 
-1. **替换 README.md**：新题目 + 新数据
-2. **替换 todo.md**：新格式要求 + 修改清单
-3. **重写 model.py**：新题目的数学方法
-4. **重写 paper.md**：新题目的解题思路和结果
-5. **替换竞赛模板**：放入新的 `.docx` 模板
-6. **调整 fix_reference.py**：从新模板提取字号/字体
-7. **运行**：`python model.py && python gen_code_images.py && convert.bat`
+1. **清空 `output/`**，删除上次任务的所有生成物
+2. **替换 `input/question.md`**：新题目 + 新数据（含附件 .xlsx 等放入 `input/`）
+3. **替换 `input/todo.md`**：新题目的 Agent 专属指令（方法选择、内容大纲、图表清单）
+4. **`templates/PAPER_SPEC.md` 通常不变**：格式规范是通用的
+5. **重写 `output/model.py`**：新题目的数学方法（建模 + 出图 + 代码图片生成）
+6. **重写 `output/paper.md`**：从 `templates/paper_skeleton.md` 复制骨架，填入新内容
+7. **如有竞赛模板**：放入 `templates/`，运行 `scripts/fix_reference.py` 更新样式
+8. **运行**：`python output/model.py && scripts/convert.bat`
+
+### 目录职责一览
+
+| 目录 | 职责 | 是否跨任务复用 |
+|:---|:---|:---|
+| `input/` | 题目、数据、Agent 指令 | 否（每次替换） |
+| `output/` | 论文、图表、模型代码 | 否（.gitignore） |
+| `templates/` | 格式规范、样式模板、论文骨架 | 是 |
+| `scripts/` | 转换脚本、后处理、样式修复 | 是 |
 
 > **核心原则：Markdown+LaTeX 写论文，Pandoc+reference.docx 管格式，python-docx 后处理兜底，EXA MCP 搜方案，多 Agent 审查质量。**

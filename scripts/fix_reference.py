@@ -5,7 +5,7 @@
 """
 import zipfile, xml.etree.ElementTree as ET
 
-REF_DOCX = 'reference.docx'
+REF_DOCX = '../templates/reference.docx'
 NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
 
 ET.register_namespace('w', NS)

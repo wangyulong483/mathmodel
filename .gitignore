@@ -1,0 +1,10 @@
+# 每次任务生成的输出（不留 git 记录）
+output/
+
+# Python
+__pycache__/
+*.pyc
+
+# OS
+.DS_Store
+Thumbs.db
