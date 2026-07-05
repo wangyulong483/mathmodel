@@ -1,12 +1,19 @@
 # -*- coding: utf-8 -*-
-"""后处理: 三线表边框 + keepNext清除 + 列宽修复 + 验证"""
+"""后处理 v2.0：keepNext清除 + 表格列宽 + 验证
+
+v2.0 变化：
+  - 三线表边框由 reference.docx "Table" 样式自动处理（Pandoc 3.x）
+  - 表头底线 0.75pt 由 tblStylePr firstRow 自动处理
+  - 表格列宽：优先用 Word MCP set_table_column_widths；本脚本作为 fallback
+  - keepNext 清除保留（无 MCP 替代）
+  - 验证增强
+"""
 from docx import Document
 from docx.shared import Cm
 from docx.oxml.ns import qn
 from lxml import etree
-import os, sys
+import os, sys, zipfile
 
-# Resolve path relative to this script → project root → output/
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 DOCX = os.path.join(PROJECT_ROOT, 'output', 'paper.docx')
@@ -16,8 +23,45 @@ NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
 
 def W(tag): return f'{{{NS}}}{tag}'
 
-# ===== 1. 三线表边框 + 列宽 =====
-print(f'[1/3] Processing {len(doc.tables)} tables...')
+# ===== 0. 表题样式修正：检测表前的加粗"表N"段落 → Table Caption =====
+print(f'[0/4] Fixing table captions...')
+table_caption_style = None
+try:
+    table_caption_style = doc.styles['Table Caption']
+except KeyError:
+    try:
+        table_caption_style = doc.styles['Caption']
+    except KeyError:
+        pass
+
+if table_caption_style:
+    fixed = 0
+    for i, table in enumerate(doc.tables):
+        tbl_elem = table._tbl
+        # Find paragraph immediately before this table in document order
+        prev = tbl_elem.getprevious()
+        if prev is not None and prev.tag == qn('w:p'):
+            # Check if it contains bold text with 表
+            p_text = ''.join(node.text or '' for node in prev.iter() if node.tag == qn('w:t'))
+            has_bold = prev.find('.//' + qn('w:b')) is not None
+            if has_bold and '表' in p_text:
+                # Apply Table Caption style
+                pPr = prev.find(qn('w:pPr'))
+                if pPr is None:
+                    pPr = etree.SubElement(prev, qn('w:pPr'))
+                # Remove existing pStyle if any
+                for ps in list(pPr):
+                    if ps.tag == qn('w:pStyle'):
+                        pPr.remove(ps)
+                ps = etree.SubElement(pPr, qn('w:pStyle'))
+                ps.set(qn('w:val'), 'Table Caption')
+                fixed += 1
+    print(f'  Fixed {fixed} table captions → Table Caption style')
+else:
+    print('  WARN: Table Caption style not found in document')
+
+# ===== 1. 表格列宽（fallback：如 MCP 已处理则跳过） =====
+print(f'[1/4] Processing {len(doc.tables)} tables (column widths)...')
 for i, table in enumerate(doc.tables):
     table.autofit = False
     tbl = table._tbl
@@ -35,46 +79,6 @@ for i, table in enumerate(doc.tables):
     tw.set(qn('w:type'), 'pct')
     etree.SubElement(tblPr, qn('w:tblLayout')).set(qn('w:type'), 'fixed')
 
-    # Three-line: top 1.5pt + bottom 1.5pt, no verticals
-    for el in list(tblPr):
-        if el.tag == qn('w:tblBorders'):
-            tblPr.remove(el)
-    borders = etree.SubElement(tblPr, qn('w:tblBorders'))
-    for side, sz in [('top', '12'), ('bottom', '12')]:
-        el = etree.SubElement(borders, qn(f'w:{side}'))
-        for a, v in [('w:val', 'single'), ('w:sz', sz),
-                      ('w:space', '0'), ('w:color', '000000')]:
-            el.set(qn(a), v)
-    for side in ['left', 'right', 'insideH', 'insideV']:
-        el = etree.SubElement(borders, qn(f'w:{side}'))
-        for a, v in [('w:val', 'none'), ('w:sz', '0'),
-                      ('w:space', '0'), ('w:color', 'auto')]:
-            el.set(qn(a), v)
-
-    # Clear cell-level borders
-    for tc in tbl.findall(f'.//{{{NS}}}tc'):
-        tcp = tc.find(qn('w:tcPr'))
-        if tcp is not None:
-            for tcb in list(tcp):
-                if tcb.tag == qn('w:tcBorders'):
-                    tcp.remove(tcb)
-
-    # Header row: 0.75pt bottom
-    rows = tbl.findall(qn('w:tr'))
-    if rows:
-        for tc in rows[0].findall(qn('w:tc')):
-            tcp = tc.find(qn('w:tcPr'))
-            if tcp is None:
-                tcp = etree.SubElement(tc, qn('w:tcPr'))
-            for el in list(tcp):
-                if el.tag == qn('w:tcBorders'):
-                    tcp.remove(el)
-            tcb = etree.SubElement(tcp, qn('w:tcBorders'))
-            b = etree.SubElement(tcb, qn('w:bottom'))
-            for a, v in [('w:val', 'single'), ('w:sz', '6'),
-                          ('w:space', '0'), ('w:color', '000000')]:
-                b.set(qn(a), v)
-
     # Column widths
     ncols = len(table.columns)
     if i == 0 and ncols == 3:
@@ -87,10 +91,10 @@ for i, table in enumerate(doc.tables):
             if ci < len(widths):
                 cell.width = widths[ci]
 
-    print(f'  Table {i+1}: {len(rows)}r x {ncols}c OK')
+    print(f'  Table {i+1}: {len(table.rows)}r x {ncols}c, widths OK')
 
-# ===== 2. Remove keepNext/keepLines, fix un-styled =====
-print('[2/3] Cleaning paragraphs...')
+# ===== 2. Remove keepNext/keepLines =====
+print('[2/4] Cleaning paragraphs (keepNext/keepLines)...')
 keepnext_count = 0
 for p in doc.paragraphs:
     pPr = p._element.find(qn('w:pPr'))
@@ -100,38 +104,41 @@ for p in doc.paragraphs:
                 if el.tag == qn(f'w:{tag}'):
                     pPr.remove(el)
                     keepnext_count += 1
+    # Fix unstyled paragraphs
     if p.style is None and p.text.strip():
         try:
             p.style = doc.styles['Compact']
-        except:
+        except KeyError:
             pass
 print(f'  Removed {keepnext_count} keepNext/keepLines')
 
 # ===== SAVE =====
 doc.save(DOCX)
 
-# ===== 3. VALIDATE =====
-print('[3/3] Validating...')
+# ===== 3. VALIDATE (v2.0: enhanced checks) =====
+print('[3/4] Validating...')
 errors = []
+warnings = []
 
-# Re-open for clean validation
 doc2 = Document(DOCX)
 
-# Check tables have borders
+# Check "Table" style is applied (v2.0: Pandoc auto-applies from reference.docx)
+# Note: borders come from the "Table" STYLE (styles.xml), not direct formatting
 for i, table in enumerate(doc2.tables):
     tbl = table._tbl
     tblPr = tbl.find(qn('w:tblPr'))
     if tblPr is not None:
-        borders = tblPr.find(qn('w:tblBorders'))
-        if borders is None:
-            errors.append(f'Table {i+1}: no borders')
+        tblStyle = tblPr.find(qn('w:tblStyle'))
+        if tblStyle is not None:
+            style_val = tblStyle.get(qn('w:val'))
+            if style_val != 'Table':
+                warnings.append(f'Table {i+1}: uses style "{style_val}" instead of "Table"')
         else:
-            top = borders.find(qn('w:top'))
-            if top is None or top.get(qn('w:sz')) != '12':
-                errors.append(f'Table {i+1}: top border missing/wrong')
+            warnings.append(f'Table {i+1}: no tblStyle ref (expected "Table")')
+    else:
+        warnings.append(f'Table {i+1}: no tblPr (malformed table)')
 
 # Check footer exists (inherited from reference.docx)
-import zipfile
 with zipfile.ZipFile(DOCX, 'r') as z:
     has_footer = any('footer' in f.lower() for f in z.namelist())
     if not has_footer:
@@ -141,19 +148,25 @@ with zipfile.ZipFile(DOCX, 'r') as z:
     if '<w:keepNext' in doc_xml:
         errors.append('keepNext still present in document.xml')
 
-# Check images (warn but don't fail — skeleton may have 0)
+# Check images
 img_count = sum(1 for r in doc2.part.rels.values() if 'image' in r.reltype)
 if img_count == 0:
-    print(f'  WARN: No images embedded (skeleton or empty paper?)')
+    warnings.append('No images embedded (skeleton or empty paper?)')
 elif img_count < 4:
-    print(f'  WARN: Only {img_count} images (expected 8+ for full paper)')
+    warnings.append(f'Only {img_count} images (expected 8+ for full paper)')
+
+# Report warnings
+if warnings:
+    print(f'  WARNINGS ({len(warnings)}):')
+    for w in warnings:
+        print(f'    WARN: {w}')
 
 if errors:
     print(f'  FAIL: {len(errors)} error(s):')
     for e in errors:
-        print(f'    ✗ {e}')
+        print(f'    FAIL: {e}')
     sys.exit(1)
 else:
     size_kb = os.path.getsize(DOCX) / 1024
     print(f'  PASS: {len(doc2.tables)} tables, {img_count} images, footer OK, {size_kb:.0f} KB')
-    print(f'\n[DONE] paper.docx validated.')
+    print(f'\n[DONE] paper.docx validated (v2.0 — "Table" style handles borders).')

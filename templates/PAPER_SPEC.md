@@ -35,10 +35,10 @@
 ### 字体字号
 | 元素 | 字号 | CJK字体 | EN字体 | 加粗 | 对齐 |
 |:---|:---|:---|:---|:---|:---|
-| 论文标题 | 16pt | 黑体 | Times New Roman | 是 | 居中 |
-| 一级标题 | 14pt | 黑体 | Times New Roman | 是 | 居中 |
-| 二级标题 | 13pt | 黑体 | Times New Roman | 是 | 左对齐 |
-| 三级标题 | 12pt | 黑体 | Times New Roman | 是 | 左对齐 |
+| 论文标题 | 12pt（小四） | 黑体 | Times New Roman | 是 | 居中 |
+| 一级标题 | 12pt（小四） | 黑体 | Times New Roman | 是 | 居中 |
+| 二级标题 | 12pt（小四） | 黑体 | Times New Roman | 是 | 左对齐 |
+| 三级标题 | 12pt（小四） | 黑体 | Times New Roman | 是 | 左对齐 |
 | 正文 | 12pt | 宋体 | Times New Roman | 否 | 两端对齐 |
 | 图表标题 | 10.5pt | 宋体 | Times New Roman | 是 | 居中 |
 | 附录标题（附录A/B） | 10.5pt | 宋体 | Times New Roman | 是 | 居中 |

@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "paper-formatter": {
+      "source": "yipng05-max/-skills",
+      "sourceType": "github",
+      "skillPath": "paper-formatter/SKILL.md",
+      "computedHash": "eb1b33a1aef5dcb2951156b9ea74385b4d3473f69d7f98ee3c4592710ea78435"
+    }
+  }
+}

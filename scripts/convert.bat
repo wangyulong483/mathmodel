@@ -34,7 +34,8 @@ echo.
 echo [1/2] Pandoc: output\paper.md → output\paper.docx
 echo.
 
-"%PANDOC%" output\paper.md -o output\paper.docx --reference-doc=templates\reference.docx --mathml --syntax-highlighting=pygments -s
+REM v2.0: removed -s flag (conflicts with --reference-doc structure)
+"%PANDOC%" output\paper.md -o output\paper.docx --reference-doc=templates\reference.docx --mathml --syntax-highlighting=pygments
 
 if %ERRORLEVEL% NEQ 0 (
     echo [ERROR] Pandoc conversion failed.
