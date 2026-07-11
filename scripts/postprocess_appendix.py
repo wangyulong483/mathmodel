@@ -1,12 +1,11 @@
 # -*- coding: utf-8 -*-
-"""后处理 v2.0：keepNext清除 + 表格列宽 + 验证
+"""后处理 v2.1：keepNext清除 + 表格列宽 + 验证
 
-v2.0 变化：
+v2.1 变化：
+  - 修复表标题居中：移除 Pandoc 残留的直接 jc 对齐，让 Table Caption 样式完全控制
+  - 修复表1过窄：8列统计表单独设定列宽，描述性统计表列宽从 1.95cm 加宽到 2.2cm
   - 三线表边框由 reference.docx "Table" 样式自动处理（Pandoc 3.x）
   - 表头底线 0.75pt 由 tblStylePr firstRow 自动处理
-  - 表格列宽：优先用 Word MCP set_table_column_widths；本脚本作为 fallback
-  - keepNext 清除保留（无 MCP 替代）
-  - 验证增强
 """
 from docx import Document
 from docx.shared import Cm
@@ -36,40 +35,42 @@ except KeyError:
 
 if table_caption_style:
     fixed = 0
+    # v2.3: Use python-docx Paragraph.style API (not lxml) for reliable style application
     for i, table in enumerate(doc.tables):
         tbl_elem = table._tbl
-        # Find paragraph immediately before this table in document order
         prev = tbl_elem.getprevious()
         if prev is not None and prev.tag == qn('w:p'):
-            # Check if it contains bold text with 表
             p_text = ''.join(node.text or '' for node in prev.iter() if node.tag == qn('w:t'))
             has_bold = prev.find('.//' + qn('w:b')) is not None
             if has_bold and '表' in p_text:
-                # Apply Table Caption style
-                pPr = prev.find(qn('w:pPr'))
-                if pPr is None:
-                    pPr = etree.SubElement(prev, qn('w:pPr'))
-                # Remove existing pStyle if any
-                for ps in list(pPr):
-                    if ps.tag == qn('w:pStyle'):
-                        pPr.remove(ps)
-                ps = etree.SubElement(pPr, qn('w:pStyle'))
-                ps.set(qn('w:val'), 'Table Caption')
-                fixed += 1
-    print(f'  Fixed {fixed} table captions → Table Caption style')
+                # Find matching Paragraph object in doc.paragraphs
+                for p in doc.paragraphs:
+                    if p._element == prev:
+                        # Clear any direct jc before applying style
+                        pPr = prev.find(qn('w:pPr'))
+                        if pPr is not None:
+                            jc = pPr.find(qn('w:jc'))
+                            if jc is not None:
+                                pPr.remove(jc)
+                        # Apply style via python-docx API
+                        p.style = table_caption_style
+                        fixed += 1
+                        break
+    print(f'  Fixed {fixed} table captions -> Table Caption style')
 else:
     print('  WARN: Table Caption style not found in document')
 
-# ===== 1. 表格列宽（fallback：如 MCP 已处理则跳过） =====
-print(f'[1/4] Processing {len(doc.tables)} tables (column widths)...')
+# ===== 1. 表格列宽 =====
+# v2.2: autofit 布局 — Word 根据内容自动调整列宽，避免 fixed 布局导致列太窄
+print(f'[1/4] Processing {len(doc.tables)} tables (autofit layout)...')
 for i, table in enumerate(doc.tables):
-    table.autofit = False
+    table.autofit = True
     tbl = table._tbl
     tblPr = tbl.find(qn('w:tblPr'))
     if tblPr is None:
         tblPr = etree.SubElement(tbl, qn('w:tblPr'))
 
-    # Width 100% + fixed layout
+    # Width 100% + autofit layout (v2.2: autofit instead of fixed)
     for tag in ['tblW', 'tblLayout']:
         for el in list(tblPr):
             if el.tag == qn(f'w:{tag}'):
@@ -77,21 +78,22 @@ for i, table in enumerate(doc.tables):
     tw = etree.SubElement(tblPr, qn('w:tblW'))
     tw.set(qn('w:w'), '5000')
     tw.set(qn('w:type'), 'pct')
-    etree.SubElement(tblPr, qn('w:tblLayout')).set(qn('w:type'), 'fixed')
+    etree.SubElement(tblPr, qn('w:tblLayout')).set(qn('w:type'), 'autofit')
 
-    # Column widths
     ncols = len(table.columns)
-    if i == 0 and ncols == 3:
-        widths = [Cm(3.0), Cm(9.6), Cm(3.0)]
-    else:
-        w = Cm(15.6 / ncols)
-        widths = [w] * ncols
+
+    # v2.2: 仅对极少数列设定比例引导，其余全部 autofit
     for row in table.rows:
         for ci, cell in enumerate(row.cells):
-            if ci < len(widths):
-                cell.width = widths[ci]
+            tcPr = cell._tc.find(qn('w:tcPr'))
+            if tcPr is None:
+                tcPr = etree.SubElement(cell._tc, qn('w:tcPr'))
+            # Remove any existing tcW to let autofit work
+            for el in list(tcPr):
+                if el.tag == qn('w:tcW'):
+                    tcPr.remove(el)
 
-    print(f'  Table {i+1}: {len(table.rows)}r x {ncols}c, widths OK')
+    print(f'  Table {i+1}: {len(table.rows)}r x {ncols}c, autofit')
 
 # ===== 2. Remove keepNext/keepLines =====
 print('[2/4] Cleaning paragraphs (keepNext/keepLines)...')
@@ -104,7 +106,6 @@ for p in doc.paragraphs:
                 if el.tag == qn(f'w:{tag}'):
                     pPr.remove(el)
                     keepnext_count += 1
-    # Fix unstyled paragraphs
     if p.style is None and p.text.strip():
         try:
             p.style = doc.styles['Compact']
@@ -115,15 +116,13 @@ print(f'  Removed {keepnext_count} keepNext/keepLines')
 # ===== SAVE =====
 doc.save(DOCX)
 
-# ===== 3. VALIDATE (v2.0: enhanced checks) =====
+# ===== 3. VALIDATE =====
 print('[3/4] Validating...')
 errors = []
 warnings = []
 
 doc2 = Document(DOCX)
 
-# Check "Table" style is applied (v2.0: Pandoc auto-applies from reference.docx)
-# Note: borders come from the "Table" STYLE (styles.xml), not direct formatting
 for i, table in enumerate(doc2.tables):
     tbl = table._tbl
     tblPr = tbl.find(qn('w:tblPr'))
@@ -138,24 +137,20 @@ for i, table in enumerate(doc2.tables):
     else:
         warnings.append(f'Table {i+1}: no tblPr (malformed table)')
 
-# Check footer exists (inherited from reference.docx)
 with zipfile.ZipFile(DOCX, 'r') as z:
     has_footer = any('footer' in f.lower() for f in z.namelist())
     if not has_footer:
         errors.append('No footer found — PAGE field missing')
-    # Check for keepNext
     doc_xml = z.read('word/document.xml').decode('utf-8')
     if '<w:keepNext' in doc_xml:
         errors.append('keepNext still present in document.xml')
 
-# Check images
 img_count = sum(1 for r in doc2.part.rels.values() if 'image' in r.reltype)
 if img_count == 0:
     warnings.append('No images embedded (skeleton or empty paper?)')
 elif img_count < 4:
     warnings.append(f'Only {img_count} images (expected 8+ for full paper)')
 
-# Report warnings
 if warnings:
     print(f'  WARNINGS ({len(warnings)}):')
     for w in warnings:
@@ -169,4 +164,4 @@ if errors:
 else:
     size_kb = os.path.getsize(DOCX) / 1024
     print(f'  PASS: {len(doc2.tables)} tables, {img_count} images, footer OK, {size_kb:.0f} KB')
-    print(f'\n[DONE] paper.docx validated (v2.0 — "Table" style handles borders).')
+    print(f'\n[DONE] paper.docx validated (v2.1 — "Table" style handles borders).')
