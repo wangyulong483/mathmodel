@@ -1,167 +1,128 @@
 # -*- coding: utf-8 -*-
-"""后处理 v2.1：keepNext清除 + 表格列宽 + 验证
+"""Post-process and validate the generated DOCX.
 
-v2.1 变化：
-  - 修复表标题居中：移除 Pandoc 残留的直接 jc 对齐，让 Table Caption 样式完全控制
-  - 修复表1过窄：8列统计表单独设定列宽，描述性统计表列宽从 1.95cm 加宽到 2.2cm
-  - 三线表边框由 reference.docx "Table" 样式自动处理（Pandoc 3.x）
-  - 表头底线 0.75pt 由 tblStylePr firstRow 自动处理
+The reference document owns typography and the three-line table style. This
+script only performs instance-level cleanup that Pandoc cannot express safely:
+caption styles, autofit layout, and removal of accidental keepNext/keepLines.
 """
+
+from __future__ import annotations
+
+import argparse
+import sys
+import zipfile
+from pathlib import Path
+
 from docx import Document
-from docx.shared import Cm
 from docx.oxml.ns import qn
 from lxml import etree
-import os, sys, zipfile
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
-DOCX = os.path.join(PROJECT_ROOT, 'output', 'paper.docx')
 
-doc = Document(DOCX)
-NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+def process_document(docx_path: Path) -> tuple[list[str], list[str]]:
+    doc = Document(docx_path)
+    warnings: list[str] = []
+    errors: list[str] = []
 
-def W(tag): return f'{{{NS}}}{tag}'
-
-# ===== 0. 表题样式修正：检测表前的加粗"表N"段落 → Table Caption =====
-print(f'[0/4] Fixing table captions...')
-table_caption_style = None
-try:
-    table_caption_style = doc.styles['Table Caption']
-except KeyError:
     try:
-        table_caption_style = doc.styles['Caption']
+        caption_style = doc.styles["Table Caption"]
     except KeyError:
-        pass
-
-if table_caption_style:
-    fixed = 0
-    # v2.3: Use python-docx Paragraph.style API (not lxml) for reliable style application
-    for i, table in enumerate(doc.tables):
-        tbl_elem = table._tbl
-        prev = tbl_elem.getprevious()
-        if prev is not None and prev.tag == qn('w:p'):
-            p_text = ''.join(node.text or '' for node in prev.iter() if node.tag == qn('w:t'))
-            has_bold = prev.find('.//' + qn('w:b')) is not None
-            if has_bold and '表' in p_text:
-                # Find matching Paragraph object in doc.paragraphs
-                for p in doc.paragraphs:
-                    if p._element == prev:
-                        # Clear any direct jc before applying style
-                        pPr = prev.find(qn('w:pPr'))
-                        if pPr is not None:
-                            jc = pPr.find(qn('w:jc'))
-                            if jc is not None:
-                                pPr.remove(jc)
-                        # Apply style via python-docx API
-                        p.style = table_caption_style
-                        fixed += 1
-                        break
-    print(f'  Fixed {fixed} table captions -> Table Caption style')
-else:
-    print('  WARN: Table Caption style not found in document')
-
-# ===== 1. 表格列宽 =====
-# v2.2: autofit 布局 — Word 根据内容自动调整列宽，避免 fixed 布局导致列太窄
-print(f'[1/4] Processing {len(doc.tables)} tables (autofit layout)...')
-for i, table in enumerate(doc.tables):
-    table.autofit = True
-    tbl = table._tbl
-    tblPr = tbl.find(qn('w:tblPr'))
-    if tblPr is None:
-        tblPr = etree.SubElement(tbl, qn('w:tblPr'))
-
-    # Width 100% + autofit layout (v2.2: autofit instead of fixed)
-    for tag in ['tblW', 'tblLayout']:
-        for el in list(tblPr):
-            if el.tag == qn(f'w:{tag}'):
-                tblPr.remove(el)
-    tw = etree.SubElement(tblPr, qn('w:tblW'))
-    tw.set(qn('w:w'), '5000')
-    tw.set(qn('w:type'), 'pct')
-    etree.SubElement(tblPr, qn('w:tblLayout')).set(qn('w:type'), 'autofit')
-
-    ncols = len(table.columns)
-
-    # v2.2: 仅对极少数列设定比例引导，其余全部 autofit
-    for row in table.rows:
-        for ci, cell in enumerate(row.cells):
-            tcPr = cell._tc.find(qn('w:tcPr'))
-            if tcPr is None:
-                tcPr = etree.SubElement(cell._tc, qn('w:tcPr'))
-            # Remove any existing tcW to let autofit work
-            for el in list(tcPr):
-                if el.tag == qn('w:tcW'):
-                    tcPr.remove(el)
-
-    print(f'  Table {i+1}: {len(table.rows)}r x {ncols}c, autofit')
-
-# ===== 2. Remove keepNext/keepLines =====
-print('[2/4] Cleaning paragraphs (keepNext/keepLines)...')
-keepnext_count = 0
-for p in doc.paragraphs:
-    pPr = p._element.find(qn('w:pPr'))
-    if pPr is not None:
-        for tag in ['keepNext', 'keepLines']:
-            for el in list(pPr):
-                if el.tag == qn(f'w:{tag}'):
-                    pPr.remove(el)
-                    keepnext_count += 1
-    if p.style is None and p.text.strip():
         try:
-            p.style = doc.styles['Compact']
+            caption_style = doc.styles["Caption"]
         except KeyError:
-            pass
-print(f'  Removed {keepnext_count} keepNext/keepLines')
+            caption_style = None
 
-# ===== SAVE =====
-doc.save(DOCX)
-
-# ===== 3. VALIDATE =====
-print('[3/4] Validating...')
-errors = []
-warnings = []
-
-doc2 = Document(DOCX)
-
-for i, table in enumerate(doc2.tables):
-    tbl = table._tbl
-    tblPr = tbl.find(qn('w:tblPr'))
-    if tblPr is not None:
-        tblStyle = tblPr.find(qn('w:tblStyle'))
-        if tblStyle is not None:
-            style_val = tblStyle.get(qn('w:val'))
-            if style_val != 'Table':
-                warnings.append(f'Table {i+1}: uses style "{style_val}" instead of "Table"')
-        else:
-            warnings.append(f'Table {i+1}: no tblStyle ref (expected "Table")')
+    fixed_captions = 0
+    if caption_style is not None:
+        for table in doc.tables:
+            previous = table._tbl.getprevious()
+            if previous is None or previous.tag != qn("w:p"):
+                continue
+            text = "".join(node.text or "" for node in previous.iter() if node.tag == qn("w:t"))
+            if "表" not in text:
+                continue
+            for paragraph in doc.paragraphs:
+                if paragraph._element is previous:
+                    paragraph.style = caption_style
+                    fixed_captions += 1
+                    break
     else:
-        warnings.append(f'Table {i+1}: no tblPr (malformed table)')
+        warnings.append("未找到 Table Caption/Caption 样式。")
 
-with zipfile.ZipFile(DOCX, 'r') as z:
-    has_footer = any('footer' in f.lower() for f in z.namelist())
-    if not has_footer:
-        errors.append('No footer found — PAGE field missing')
-    doc_xml = z.read('word/document.xml').decode('utf-8')
-    if '<w:keepNext' in doc_xml:
-        errors.append('keepNext still present in document.xml')
+    for table in doc.tables:
+        table.autofit = True
+        table_properties = table._tbl.find(qn("w:tblPr"))
+        if table_properties is None:
+            table_properties = etree.SubElement(table._tbl, qn("w:tblPr"))
 
-img_count = sum(1 for r in doc2.part.rels.values() if 'image' in r.reltype)
-if img_count == 0:
-    warnings.append('No images embedded (skeleton or empty paper?)')
-elif img_count < 4:
-    warnings.append(f'Only {img_count} images (expected 8+ for full paper)')
+        for child in list(table_properties):
+            if child.tag in {qn("w:tblW"), qn("w:tblLayout")}:
+                table_properties.remove(child)
+        table_width = etree.SubElement(table_properties, qn("w:tblW"))
+        table_width.set(qn("w:w"), "5000")
+        table_width.set(qn("w:type"), "pct")
+        layout = etree.SubElement(table_properties, qn("w:tblLayout"))
+        layout.set(qn("w:type"), "autofit")
 
-if warnings:
-    print(f'  WARNINGS ({len(warnings)}):')
-    for w in warnings:
-        print(f'    WARN: {w}')
+        for row in table.rows:
+            for cell in row.cells:
+                cell_properties = cell._tc.find(qn("w:tcPr"))
+                if cell_properties is None:
+                    cell_properties = etree.SubElement(cell._tc, qn("w:tcPr"))
+                for child in list(cell_properties):
+                    if child.tag == qn("w:tcW"):
+                        cell_properties.remove(child)
 
-if errors:
-    print(f'  FAIL: {len(errors)} error(s):')
-    for e in errors:
-        print(f'    FAIL: {e}')
-    sys.exit(1)
-else:
-    size_kb = os.path.getsize(DOCX) / 1024
-    print(f'  PASS: {len(doc2.tables)} tables, {img_count} images, footer OK, {size_kb:.0f} KB')
-    print(f'\n[DONE] paper.docx validated (v2.1 — "Table" style handles borders).')
+    removed = 0
+    for paragraph in doc.paragraphs:
+        properties = paragraph._element.find(qn("w:pPr"))
+        if properties is None:
+            continue
+        for tag in ("keepNext", "keepLines"):
+            for child in list(properties):
+                if child.tag == qn(f"w:{tag}"):
+                    properties.remove(child)
+                    removed += 1
+
+    doc.save(docx_path)
+
+    with zipfile.ZipFile(docx_path) as archive:
+        names = archive.namelist()
+        document_xml = archive.read("word/document.xml").decode("utf-8", errors="replace")
+        if "<w:keepNext" in document_xml:
+            errors.append("document.xml 仍包含 keepNext。")
+        if not any(name.lower().startswith("word/footer") for name in names):
+            warnings.append("未检测到页脚部件，请确认页码已生成。")
+
+    reloaded = Document(docx_path)
+    for index, table in enumerate(reloaded.tables, start=1):
+        table_properties = table._tbl.find(qn("w:tblPr"))
+        table_style = table_properties.find(qn("w:tblStyle")) if table_properties is not None else None
+        if table_style is None:
+            warnings.append(f"表格 {index} 未显式引用 Table 样式。")
+        elif table_style.get(qn("w:val")) != "Table":
+            warnings.append(f"表格 {index} 使用了 {table_style.get(qn('w:val'))}，不是 Table。")
+
+    print(f"[OK] 修正表标题 {fixed_captions} 个，清除 keepNext/keepLines {removed} 个")
+    print(f"[OK] 表格 {len(reloaded.tables)} 个，图片 {sum('image' in rel.reltype for rel in reloaded.part.rels.values())} 个")
+    return warnings, errors
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="后处理并验证数学建模论文 DOCX")
+    parser.add_argument("--docx", default="output/paper.docx", help="DOCX 文件路径")
+    args = parser.parse_args()
+    path = Path(args.docx).resolve()
+    if not path.exists():
+        print(f"[ERROR] 找不到 DOCX：{path}", file=sys.stderr)
+        return 1
+
+    warnings, errors = process_document(path)
+    for warning in warnings:
+        print(f"[WARN] {warning}")
+    for error in errors:
+        print(f"[ERROR] {error}", file=sys.stderr)
+    return 1 if errors else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

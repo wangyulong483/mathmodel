@@ -1,0 +1,31 @@
+{
+  "project_version": "4.0",
+  "competition": {
+    "name": "全国大学生数学建模竞赛",
+    "profile": "cumcm-2026",
+    "official_rules_url": "https://www.mcm.edu.cn/html_cn/node/4cd596519c9eb9fbd866398f6df0caa3.html",
+    "body_page_target": 20,
+    "abstract_max_pages": 1,
+    "margin_cm": 2.5,
+    "include_table_of_contents": false
+  },
+  "paths": {
+    "input_dir": "input",
+    "output_dir": "output",
+    "template_dir": "templates",
+    "paper_markdown": "output/paper.md",
+    "paper_docx": "output/paper.docx",
+    "model_script": "output/model.py",
+    "plan_json": "output/ai_plan.json",
+    "audit_json": "output/audit_report.json",
+    "audit_markdown": "output/audit_report.md"
+  },
+  "ai": {
+    "provider": "deepseek",
+    "api_style": "chat",
+    "base_url": "https://api.deepseek.com/v1",
+    "model": "deepseek-chat",
+    "temperature": 0.2,
+    "timeout_seconds": 120
+  }
+}

@@ -131,7 +131,7 @@ def rename_style(style_elem, new_name):
 #   H2/H3:   小四号黑体 (12pt) bold left-aligned
 #   Body:    小四号宋体 (12pt)
 #   Caption: 五号宋体 (10.5pt) bold centered
-# Official rules (2025): font/size/line-spacing NOT strictly specified,
+# Official rules (2026): font/size/line-spacing are not the main constraint,
 #   but bold headings are universally expected in academic papers.
 PARA_SPECS = [
     ('Normal',          'Times New Roman', 'SimSun', 12, False, 'both',   1.25, 0.74, 0,  0,  '000000'),
@@ -380,8 +380,8 @@ def main():
 
     print(f'[DONE] {REF_DOCX} updated — all styles black, keepNext disabled, "Table" style ready.')
     print()
-    print('Next: Use Word MCP create_custom_style for simple styles (Author, Date, Subtitle, etc.)')
-    print('Then: pandoc paper.md -o paper.docx --reference-doc=templates/reference.docx --mathml')
+    print('Next: run scripts/build_paper.py after output/paper.md is ready.')
+    print('Then: inspect output/audit_report.md and open the generated DOCX in Word/WPS.')
 
 if __name__ == '__main__':
     main()
