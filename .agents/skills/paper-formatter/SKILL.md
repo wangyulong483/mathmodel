@@ -5,6 +5,8 @@ description: Format academic manuscripts to match a target journal's style. Use 
 
 # Paper Formatter Skill
 
+> DSH 按需加载本技能（目录 `.agents/skills/paper-formatter/`）。下面脚本路径相对**项目根**，执行前先 `cd` 到项目根；只处理 `input/` 的范文，不要覆盖 `output/paper.docx`（那是 `build_paper.py` 的产物）。
+
 Reformat an academic manuscript to match the style of a target journal, based on a sample paper (范文).
 
 ## Workflow
@@ -23,7 +25,7 @@ Ask the user for:
 Run the analysis script:
 ```bash
 pip install python-docx 2>/dev/null
-python ~/.claude/skills/paper-formatter/scripts/analyze_docx.py "<sample.docx>" "<output_rules.json>"
+python .agents/skills/paper-formatter/scripts/analyze_docx.py "<sample.docx>" "<output_rules.json>"
 ```
 
 This extracts:
@@ -102,13 +104,13 @@ Read the user's manuscript and extract structured content:
 
 Save the structured content to a temporary JSON file, then run:
 ```bash
-python ~/.claude/skills/paper-formatter/scripts/format_docx.py "<content.json>" "<style_rules.json>" "<output.docx>"
+python .agents/skills/paper-formatter/scripts/format_docx.py "<content.json>" "<style_rules.json>" "<output.docx>"
 ```
 
 **If output is `.tex`:**
 
 ```bash
-python ~/.claude/skills/paper-formatter/scripts/generate_latex.py "<content.json>" "<style_rules.json>" "<output.tex>"
+python .agents/skills/paper-formatter/scripts/generate_latex.py "<content.json>" "<style_rules.json>" "<output.tex>"
 ```
 
 ### Step 6: Review & Iterate

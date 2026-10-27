@@ -1,155 +1,153 @@
-# MathModel 4.0
+# MathModel 4.1
 
-面向全国大学生数学建模竞赛的可复现建模与论文生成工具链。项目以 Python + Pandoc + `reference.docx` 为稳定主链路，同时提供可切换的 GPT、DeepSeek 和其他 OpenAI-compatible 模型助手。
+面向全国大学生数学建模竞赛（CUMCM）的**可复现建模 + 论文生成**工作流，专为 [DeepSeek Harness](https://deepseek.com)（下称 DSH）会话设计。
 
-这个项目不会替队伍“编造一个答案”。AI 负责题目拆解、模型候选、验证计划、论文审稿和格式审计；数据、代码运行结果、引用来源和最终结论必须由队伍确认。
+它不是"一键生成论文"的工具：模型跑出的每个数字都有文件来源，论文的格式与提交检查由脚本执行，AI 负责拆题、候选方案、验证设计与审稿。一句话概括：
 
-## 目录
+> **输入题目 -> 代码算出结果 -> 论文只引用结果 -> 脚本审计并生成 DOCX。**
+
+## 环境要求
+
+| 依赖 | 版本 | 说明 |
+|:---|:---|:---|
+| Python | 3.10+ | `python-docx` `Pillow` `numpy` `scipy` `pandas` `matplotlib` `scikit-learn` `lxml`（见 `requirements.txt`） |
+| Pandoc | 3.x | `winget install JohnMacFarlane.Pandoc` / `brew install pandoc` / `apt install pandoc` |
+| 编辑器 | 任意 | 推荐 VS Code；`output/paper.docx` 用 Word 或 LibreOffice 打开 |
+| DSH | 当前版 | 在新会话中自动加载本仓库的 `AGENTS.md` |
+
+## 目录结构
 
 ```text
 mathmodel/
-├── input/
-│   ├── question.md          # 题目、数据说明、具体问题
-│   └── todo.md              # 队伍约束、分工、待办
-├── output/                  # 当前任务生成物，默认不进 Git
-│   ├── model.py             # 可复现建模代码
-│   ├── paper.md             # 论文源稿
-│   ├── paper.docx           # 生成的 Word 论文
-│   ├── figures/             # 图片
-│   └── tables/              # 表格或中间数据
-├── templates/
-│   ├── reference.docx       # Pandoc 样式模板
-│   ├── PAPER_SPEC.md        # 国赛格式与写作约束
-│   └── paper_skeleton.md    # 论文骨架
-├── scripts/
-│   ├── init_project.py      # 初始化任务
-│   ├── ai_assistant.py      # GPT/DeepSeek 结构化计划与审稿
-│   ├── audit_project.py     # 离线 Markdown/DOCX 审计
-│   ├── build_paper.py       # 统一构建入口
-│   ├── package_support.py   # 支撑材料 ZIP
-│   ├── build_reference.py   # 构建 Word 模板
-│   └── postprocess_appendix.py
-├── mathmodel.config.json    # 路径、比赛档案、AI 默认配置
-├── requirements.txt
-└── wiki.md                  # 完整工作流
+├─ AGENTS.md                  # DSH 会话契约：硬规则 + 入口命令 + 阶段 gate（自动加载）
+├─ README.md                  # 本文件
+├─ wiki.md                    # 完整工作流（权威流程）
+├─ docs/
+│  └─ agent-workflow.md       # DSH 多代理 / 目标 / 后台任务 / 记忆 / 提示词模板
+├─ input/                     # 题目与数据（只读，不要在这里写代码）
+│  ├─ question.md             # 题目原文
+│  ├─ todo.md                 # 小问拆解与进度
+│  └─ 附件*.md                # 数据说明、附件链接
+├─ templates/
+│  ├─ PAPER_SPEC.md           # 可执行格式约束 + 定稿检查清单
+│  ├─ paper_skeleton.md       # 论文 Markdown 骨架
+│  └─ reference.docx          # 由 scripts/build_reference.py 生成，勿手改
+├─ scripts/                   # 工具链（唯一入口，见下表）
+├─ .dsh/skills/ .agents/skills/  # DSH 技能：paper-formatter、mathmodel-pipeline
+├─ output/                    # 全部生成物（不进 Git）
+└─ mathmodel.config.json      # 赛事档案：页数、边距、AI 接口、路径
 ```
 
 ## 快速开始
 
-### 1. 安装依赖
-
 ```powershell
-winget install JohnMacFarlane.Pandoc
-python -m pip install -r requirements.txt
-```
+# 0) 检查环境
+python --version
+pandoc --version
 
-### 2. 初始化任务
-
-```powershell
+# 1) 初始化（保留已有模板，只清生成物）
 python scripts/init_project.py --keep-reference
-```
 
-初始化只清理 `output/` 生成物，不会覆盖 `input/`、`templates/` 或 `.claude/`。需要彻底开启新题目时使用：
+# 2) 把题目写进 input/question.md，小问拆解写进 input/todo.md
+#    附件与数据说明写进 input/附件*.md
 
-```powershell
-python scripts/init_project.py --force
-```
+# 3) （可选）导出结构化计划提示词；不配 API Key 也能用
+python scripts/ai_assistant.py plan --print-prompt
+#    -> output/ai_prompt_plan.md，粘给任意模型，把 JSON 存回 output/ai_plan.json
 
-### 3. 准备输入
+# 4) 建模：写 output/model.py，运行并落盘结果
+python output/model.py
 
-把题目和数据说明写入 `input/question.md`，把分工、限制、必须回答的内容写入 `input/todo.md`，原始数据文件放在 `input/`。
+# 5) 写作：在 output/paper.md 按 templates/paper_skeleton.md 展开
+#    所有数字引用 output/tables 或 output/logs 中的结果
 
-### 4. 生成 AI 研究计划（可选）
-
-默认配置保留 DeepSeek 兼容入口。切换到 GPT 时，复制 `.env.example` 中的配置到当前终端环境，并设置 API Key：
-
-```powershell
-$env:MM_AI_PROVIDER="openai"
-$env:MM_AI_API_STYLE="responses"
-$env:MM_AI_BASE_URL="https://api.openai.com/v1"
-$env:MM_AI_MODEL="gpt-5.6-terra"
-$env:MM_AI_API_KEY="YOUR_KEY"
-python scripts/ai_assistant.py plan --force
-```
-
-DeepSeek 或其他兼容服务使用 `chat` API 风格：
-
-```powershell
-$env:MM_AI_PROVIDER="deepseek"
-$env:MM_AI_API_STYLE="chat"
-$env:MM_AI_BASE_URL="https://api.deepseek.com/v1"
-$env:MM_AI_MODEL="deepseek-chat"
-python scripts/ai_assistant.py plan --force
-```
-
-计划写入 `output/ai_plan.json`。没有 API Key 时不影响离线建模、审计和文档构建。
-
-### 5. 运行模型与生成论文
-
-队伍在 `output/model.py` 中实现模型，在 `output/paper.md` 中写论文。完成后执行：
-
-```powershell
+# 6) 审计 -> 构建 -> 打包
 python scripts/audit_project.py
 python scripts/build_paper.py
 python scripts/package_support.py
 ```
 
-Windows 也可以执行：
+Windows 下也可双击 `scripts/convert.bat`（等价于 `build_paper.py`）。
 
-```powershell
-scripts\convert.bat
-```
+## 在 DeepSeek Harness 里怎么用
 
-`build_paper.py` 的顺序是：
+DSH 会话打开本目录后，`AGENTS.md` 自动成为项目契约。推荐节奏：
 
-1. 运行 `output/model.py`
-2. 审计论文 Markdown
-3. 在 `output/` 目录运行 Pandoc，保证相对图片路径正确
-4. 运行 DOCX 后处理和结构检查
-5. 写入 `output/audit_report.json` 与 `output/audit_report.md`
+1. **先计划，再动手**：让它读完 `input/` 并用 plan mode 给出小问拆解、模型候选与验证方案；确认后再写代码。
+2. **研究用原生工具**：`web_search` 找线索，`web_fetch` 打开原文核对；搜索摘要不算证据。需要并行研究多个小问时，用 `subagent` 分头做，各自回传"事实 + 链接 + 置信度"。
+3. **写作用域隔离**：论文、代码、模板由不同角色/子代理并行时，用 Agent Teams 的 `team_task` 登记写作用域，避免互相覆盖（见 `docs/agent-workflow.md`）。
+4. **长任务后台跑**：仿真、网格搜索、批量训练用后台 job 提交，用 `job_output` 收集；不要在前台干等。
+5. **交付走脚本**：`audit_project.py` -> `build_paper.py` -> `package_support.py`，不要手工 pandoc。
 
-## 国赛写作底线
+> 没有配置模型 API 也能完整使用：`ai_assistant.py` 的 `--print-prompt` 会把提示词和 JSON Schema 写到 `output/`，粘到任意聊天窗口即可；DSH 本身已内置模型。
 
-项目内的 `cumcm-2026` 档案依据官方 2026 修订稿整理，正式提交前仍应重新打开官方通知核对当年要求：
+## 命令表
 
-- 论文结构应包含摘要、问题重述、问题分析、模型假设、符号说明、模型建立与求解、模型评价、参考文献和附录。
-- 不默认生成目录；正文不泄露队伍、学校等身份信息。
-- 摘要控制在摘要专用页内，关键词使用空格分隔。
-- 图题位于图下方，表题位于表上方；图号、表号分别从 1 开始连续。
-- 表格优先拆成窄表，单表建议不超过 6 列；表内尽量使用 Unicode 数学符号，段落公式再使用 LaTeX。
-- 论文中的数字必须能从模型代码、数据文件或审计报告复现。
-- 参考文献只能使用真实、可核实的来源，正文必须有对应引用。
-- 论文文件和支撑材料按当年官方报名/提交通知分别准备，不把支撑材料误当作论文正文。
-
-## 联网研究协议
-
-联网研究由 Agent 使用 Brave MCP 和 GitHub MCP 完成，脚本本身保持离线可运行：
-
-1. Brave MCP：优先查官方竞赛通知、论文格式、标准、论文原文和算法原始资料。
-2. GitHub MCP：查找成熟实现、Pandoc 模板和测试方式，只借鉴公开工程结构，不把仓库代码当作论文结论。
-3. 搜索结果摘要不能直接作为引用；必须打开原文并记录标题、作者、年份、链接和使用位置。
-4. AI 不得自行生成文献条目。无法核实的资料标记为待查，不进入最终参考文献。
-
-## 主要命令
-
-| 命令 | 用途 |
+| 命令 | 作用 |
 |:---|:---|
-| `python scripts/init_project.py --keep-reference` | 初始化任务 |
-| `python scripts/ai_assistant.py plan --force` | 生成结构化解题计划 |
-| `python scripts/ai_assistant.py review --force` | 审阅论文草稿 |
-| `python scripts/audit_project.py` | 离线审计源稿和已有 DOCX |
-| `python scripts/build_paper.py` | 运行模型、转换、后处理、审计 |
-| `python scripts/build_paper.py --skip-model` | 只转换已有论文源稿 |
-| `python scripts/gen_code_images.py --input output/model.py --output output/figures/model_code.png` | 生成代码附录图片 |
-| `python scripts/package_support.py` | 打包支撑材料 |
+| `python scripts/init_project.py [--force\|--keep-reference\|--keep-output\|--skip-deps\|--no-build]` | 初始化；`--force` 清空 output 重开题目 |
+| `python scripts/audit_project.py` | 离线审计 Markdown 与已有 DOCX，写 `output/audit_report.json/.md` |
+| `python scripts/build_paper.py [--skip-model\|--skip-audit\|--keep-docx]` | 模型 -> 审计 -> Pandoc -> 附录后处理 -> 复核 |
+| `python scripts/build_reference.py` | 从 pandoc 默认模板生成 `templates/reference.docx`（A4/2.5cm/页脚/三线表）；无参数，重复执行幂等 |
+| `python scripts/gen_code_images.py` | 把代码转成带行号的附录图片 |
+| `python scripts/package_support.py` | 打包 `output/support_materials.zip` |
+| `python scripts/ai_assistant.py plan [--print-prompt\|--force]` | 结构化建模计划（JSON） |
+| `python scripts/ai_assistant.py review [--print-prompt\|--force]` | 论文审查报告（JSON） |
+| `python scripts/convert.bat` | Windows 快捷方式，转调 `build_paper.py` |
+
+## 工作流概览
+
+| 阶段 | 产物 | 通过条件 |
+|:---|:---|:---|
+| 初始化 | 干净 `output/`、模板 | pandoc 3.x、依赖齐全 |
+| 题目理解 | 事实表、约束、数据字段 | 引用可打开核对 |
+| 计划 | `output/ai_plan.json` 或对话内计划 | 每问有候选模型 + 验证指标 |
+| 数据审计 | `output/logs/` 记录 | 单位、缺失、异常、划分明确 |
+| 建模求解 | `output/model.py`、`output/tables/*.json` | 随机种子固定，结果可复现 |
+| 论文 | `output/paper.md` | 图表编号连续、正文引用齐全、数字有来源 |
+| 审计构建 | `output/paper.docx`、审计报告 | 无阻断项，DOCX 打开正常 |
+| 审稿 | 审查报告 | 数学/数据/格式风险清零 |
+| 提交 | `support_materials.zip` | 两个文件可打开，无身份信息 |
+
+完整的阶段说明、写作规则、公式约束与故障排查见 [wiki.md](wiki.md)；格式细则见 [templates/PAPER_SPEC.md](templates/PAPER_SPEC.md)。
+
+## 常见问题
+
+| 症状 | 处理 |
+|:---|:---|
+| `pandoc not found` | 安装 pandoc 3.x 并重开终端；`init_project.py` 会检查版本 |
+| DOCX 打开空白/图片丢失 | 不要手工 pandoc；用 `build_paper.py`，它在 `output/` 内执行 |
+| 页脚没有页码 / 不是 A4 | 重新生成模板：`python scripts/build_reference.py`（无参数），再构建 |
+| AI 调用失败（401/超时） | 用 `--print-prompt` 导出提示词离线完成；或检查 `.env` 的 `MM_AI_*` |
+| 审计报"数字无来源" | 把结果写进 `output/tables` 并在正文用表格/行内代码引用 |
+| 页数超限 | 精简正文与图表，不要改页边距；见 `PAPER_SPEC.md` |
+
+## 4.1 更新（从 Claude Code 版迁移）
+
+- **新增 `AGENTS.md`**：作为 DSH 唯一会话契约，替代原先散落在对话里的约定。
+- **研究协议原生**：Brave/GitHub MCP 两条硬依赖改为 `web_search` + `web_fetch`；要接 MCP 时，DSH 的入口是 profile 里 `cordis.patch.yml` 的 `dsh-mcp-client` 插件配置（不是 `mcpServers` 键），工具名形如 `mcp__<server>__<tool>`，默认不需要。
+- **AI 步骤可分可合**：`ai_assistant.py` 新增 `--print-prompt`，无 API Key 也能产出计划/审稿提示词；修复了 `project_path` 未导入导致的崩溃。
+- **模板自愈**：`build_reference.py` 现在把 A4 页面、2.5cm 页边距、页脚页码直接写进 `reference.docx`，并修复 rels 命名空间；重复执行幂等。
+- **初始化自检**：`init_project.py` 检查 `AGENTS.md` 与技能目录（`.dsh/skills` 或 `.agents/skills`）是否就位。
+- **清理 Claude 遗留**：删除 `.claude/`、`skills-lock.json`、`reference.docx.bak`；`paper-formatter` 技能脚本路径改为仓库内相对路径。
+- **新增 `docs/agent-workflow.md`** 与 `mathmodel-pipeline` 技能，覆盖 DSH 的 plan mode、subagent、Agent Teams、后台 job 与记忆用法。
+
+## 文档地图
+
+| 文档 | 何时读 |
+|:---|:---|
+| [AGENTS.md](AGENTS.md) | 每次会话自动加载，先看它 |
+| [wiki.md](wiki.md) | 想知道某阶段具体怎么做 |
+| [docs/agent-workflow.md](docs/agent-workflow.md) | 想并行/分工/后台跑/让代理自我审查 |
+| [templates/PAPER_SPEC.md](templates/PAPER_SPEC.md) | 写作与定稿前 |
+| `.agents/skills/paper-formatter/SKILL.md` | 需要套用期刊/竞赛排版时 |
 
 ## 资料来源
 
-- [全国大学生数学建模竞赛 2026 论文格式规范](https://www.mcm.edu.cn/html_cn/node/4cd596519c9eb9fbd866398f6df0caa3.html)
-- [全国大学生数学建模竞赛官网](https://www.mcm.edu.cn/)
-- [CUMCMThesis：2026 LaTeX 模板](https://github.com/latexstudio/CUMCMThesis)
-- [math-modeling-skill：三阶段数学建模工作流](https://github.com/XiaoMaColtAI/math-modeling-skill)
-- [Pandoc DOCX 模板实践](https://github.com/Achuan-2/pandoc_docx_template)
+- 全国大学生数学建模竞赛官网：<https://www.mcm.edu.cn/>
+- CUMCMThesis LaTeX 模板与格式参考：<https://github.com/latexstudio/CUMCMThesis>
+- Pandoc 文档：<https://pandoc.org/MANUAL.html>
+- 参考模板来源：`pandoc_docx_template`
 
 ## License
 

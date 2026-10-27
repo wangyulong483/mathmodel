@@ -1,16 +1,23 @@
 # -*- coding: utf-8 -*-
 """
-构建 reference.docx v2.0
+构建 reference.docx v2.1
   1. 从 pandoc 默认生成基础 reference.docx
   2. 修复段落/字符样式（CJK/Latin 字体分离 + 字号/加粗/对齐/行距）
   3. 注入 "Table" 表格样式（三线表边框：1.5pt 顶/底 + 0.75pt 表头下）
-  4. 确保所有字体颜色 #000000，禁用 keepNext
+  4. 注入页脚 PAGE 字段、页面设置（A4 + 2.5 cm 页边距）与 sectPr 引用
+  5. 确保所有字体颜色 #000000，禁用 keepNext
 
 用法：python scripts/build_reference.py
 
-v2.0 新增：
+v2.1 变更：
+  - sectPr 补齐 w:footerReference / w:pgSz / w:pgMar：
+    A4 11906x16838 twips，四边 2.5 cm = 1417 twips，页眉页脚 720 twips
+  - footerReference 的 r:id 动态取自 document.xml.rels（当前为 rId31）
+  - 修正新增 Relationship 缺 Relationships 命名空间的问题，并归一化 rels 输出
+  - 幂等：重复运行先删旧 footerReference/pgSz/pgMar 再按 CT_SectPr 顺序插入
+
+v2.0 变更：
   - "Table" 样式 → Pandoc 3.x 自动应用到所有表格 → 零后处理
-  - 代码精简，移除废弃样式操作
 """
 import subprocess, sys, os, zipfile, xml.etree.ElementTree as ET
 
@@ -19,8 +26,29 @@ PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 REF_DOCX = os.path.join(PROJECT_ROOT, 'templates', 'reference.docx')
 
 NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+REL_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
+PKG_REL_NS = 'http://schemas.openxmlformats.org/package/2006/relationships'
+CT_NS = 'http://schemas.openxmlformats.org/package/2006/content-types'
+FOOTER_REL_TYPE = REL_NS + '/footer'
 ET.register_namespace('w', NS)
-ET.register_namespace('r', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships')
+ET.register_namespace('r', REL_NS)
+
+# OOXML CT_SectPr 子元素顺序；footerReference 必须排在 footnotePr/pgSz 之前
+SECTPR_ORDER = [
+    'headerReference', 'footerReference', 'footnotePr', 'endnotePr', 'type',
+    'pgSz', 'pgMar', 'paperSrc', 'pgBorders', 'lnNumType', 'pgNumType', 'cols',
+    'formProt', 'vAlign', 'noEndnote', 'titlePg', 'textDirection', 'bidi',
+    'rtlGutter', 'docGrid', 'printerSettings', 'sectPrChange',
+]
+
+# A4 纵向 21 x 29.7 cm，四边 2.5 cm，页眉页脚 1.27 cm（单位：twips）
+PAGE_SETUP = {
+    'pgSz': {'w': '11906', 'h': '16838'},
+    'pgMar': {
+        'top': '1417', 'right': '1417', 'bottom': '1417', 'left': '1417',
+        'header': '720', 'footer': '720', 'gutter': '0',
+    },
+}
 
 def W(tag): return f'{{{NS}}}{tag}'
 
@@ -33,6 +61,108 @@ def get_or_create(parent, tag):
 def remove_all(parent, tag):
     for el in list(parent.findall(W(tag))):
         parent.remove(el)
+
+def local_name(tag):
+    """返回带命名空间标签的本地名。"""
+    return tag.split('}')[-1]
+
+def serialize_with_default_ns(root, namespace):
+    """用 OPC 默认命名空间序列化，输出 <Relationships xmlns=...> 而非 ns0: 前缀。"""
+    ET.register_namespace('', namespace)
+    return ET.tostring(root, encoding='utf-8', xml_declaration=True)
+
+def insert_sectpr_child(sect_pr, child):
+    """按 OOXML CT_SectPr 规定顺序插入 sectPr 子元素。"""
+    order = {name: index for index, name in enumerate(SECTPR_ORDER)}
+    fallback = len(SECTPR_ORDER)
+    target = order.get(local_name(child.tag), fallback)
+    position = len(sect_pr)
+    for index, existing in enumerate(sect_pr):
+        if order.get(local_name(existing.tag), fallback) > target:
+            position = index
+            break
+    sect_pr.insert(position, child)
+
+def rebuild_rels(rels_bytes):
+    """归一化 document.xml.rels，确保 footer 关系存在，返回 (新字节, footer rId)。
+
+    历史版本用 ET.SubElement(rels_root, 'Relationship') 追加关系，生成的是
+    无 Relationships 命名空间的元素；这里统一重建为带 OPC 命名空间的干净 XML。
+    """
+    entries = []
+    if rels_bytes:
+        root = ET.fromstring(rels_bytes)
+        entries = [
+            dict(element.attrib) for element in root
+            if local_name(element.tag) == 'Relationship'
+        ]
+
+    footer = next(
+        (entry for entry in entries if entry.get('Type', '') == FOOTER_REL_TYPE),
+        None,
+    )
+    existing_ids = {entry.get('Id') for entry in entries}
+    next_id = 1 + max(
+        [int(entry['Id'][3:]) for entry in entries
+         if str(entry.get('Id', '')).startswith('rId') and entry['Id'][3:].isdigit()]
+        or [0]
+    )
+
+    def allocate_id():
+        nonlocal next_id
+        while f'rId{next_id}' in existing_ids:
+            next_id += 1
+        relation_id = f'rId{next_id}'
+        existing_ids.add(relation_id)
+        next_id += 1
+        return relation_id
+
+    if footer is None:
+        footer = {'Id': allocate_id(), 'Type': FOOTER_REL_TYPE, 'Target': 'footer1.xml'}
+        entries.append(footer)
+    footer.setdefault('Id', allocate_id())
+    footer['Type'] = FOOTER_REL_TYPE
+    footer['Target'] = 'footer1.xml'
+
+    new_root = ET.Element(f'{{{PKG_REL_NS}}}Relationships')
+    for entry in entries:
+        relation = ET.SubElement(new_root, f'{{{PKG_REL_NS}}}Relationship')
+        for key in ('Id', 'Type', 'Target', 'TargetMode'):
+            if key in entry:
+                relation.set(key, entry[key])
+    return serialize_with_default_ns(new_root, PKG_REL_NS), footer['Id']
+
+def apply_page_setup(document_bytes, footer_rid):
+    """向 reference document.xml 的 sectPr 写入 A4 页面设置与页脚引用（幂等）。"""
+    root = ET.fromstring(document_bytes)
+    body = root.find(W('body'))
+    if body is None:
+        raise RuntimeError('reference.docx 的 document.xml 缺少 w:body')
+    sect_pr = body.find(W('sectPr'))
+    if sect_pr is None:
+        sect_pr = ET.SubElement(body, W('sectPr'))
+
+    # 先删旧值：重复运行不重复插入，旧 rId 也不会残留
+    for tag in ('footerReference', 'pgSz', 'pgMar'):
+        for element in list(sect_pr.findall(W(tag))):
+            sect_pr.remove(element)
+
+    footer_reference = ET.Element(W('footerReference'))
+    footer_reference.set(W('type'), 'default')
+    footer_reference.set(f'{{{REL_NS}}}id', footer_rid)
+    insert_sectpr_child(sect_pr, footer_reference)
+
+    page_size = ET.Element(W('pgSz'))
+    for name, value in PAGE_SETUP['pgSz'].items():
+        page_size.set(W(name), value)
+    insert_sectpr_child(sect_pr, page_size)
+
+    page_margin = ET.Element(W('pgMar'))
+    for name, value in PAGE_SETUP['pgMar'].items():
+        page_margin.set(W(name), value)
+    insert_sectpr_child(sect_pr, page_margin)
+
+    return ET.tostring(root, encoding='utf-8', xml_declaration=True)
 
 # ============================================================
 #  字体/样式 辅助函数
@@ -297,8 +427,8 @@ def main():
     root.append(table_style)
     print('  [OK] "Table" style injected: top 1.5pt + bottom 1.5pt + header-bottom 0.75pt')
 
-    # ---- Step 2.5: 创建页脚页码 ----
-    print("\n[2.5/3] Creating footer with PAGE field...")
+    # ---- Step 2.5: 页脚 + 页面设置 + 关系/内容类型 ----
+    print("\n[2.5/3] Preparing footer, page setup and relationships...")
     FOOTER_XML = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
   <w:p>
@@ -321,54 +451,37 @@ def main():
     all_files['word/footer1.xml'] = FOOTER_XML.encode('utf-8')
     print('  Created word/footer1.xml (centered PAGE field, TNR 10.5pt)')
 
-    # Update document.xml.rels to reference footer
-    rels_xml = all_files.get('word/_rels/document.xml.rels')
-    if rels_xml is not None:
-        rels_root = ET.fromstring(rels_xml)
-        RELS_NS = 'http://schemas.openxmlformats.org/package/2006/relationships'
-        # Check if footer relationship already exists
-        has_footer_rel = False
-        for rel in rels_root:
-            if rel.get('Type', '').endswith('/footer'):
-                has_footer_rel = True
-                break
-        if not has_footer_rel:
-            rId = 'rId99'
-            # Find max rId
-            max_id = 0
-            for rel in rels_root:
-                rid = rel.get('Id', 'rId0')
-                if rid.startswith('rId'):
-                    try:
-                        max_id = max(max_id, int(rid[3:]))
-                    except:
-                        pass
-            rId = f'rId{max_id + 1}'
-            footer_rel = ET.SubElement(rels_root, 'Relationship')
-            footer_rel.set('Id', rId)
-            footer_rel.set('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer')
-            footer_rel.set('Target', 'footer1.xml')
-            all_files['word/_rels/document.xml.rels'] = ET.tostring(rels_root, encoding='utf-8', xml_declaration=True)
-            print(f'  Updated document.xml.rels ({rId} → footer1.xml)')
+    # document.xml.rels：归一化命名空间，确保 footer 关系存在并取回 rId
+    rels_key = 'word/_rels/document.xml.rels'
+    if rels_key not in all_files:
+        print(f'ERROR: reference.docx 缺少 {rels_key}，无法关联页脚。')
+        sys.exit(1)
+    all_files[rels_key], footer_rid = rebuild_rels(all_files[rels_key])
+    print(f'  document.xml.rels normalized (footer r:id={footer_rid} → footer1.xml)')
 
-    # Update [Content_Types].xml
+    # [Content_Types].xml：注册 footer1.xml
     content_types = all_files.get('[Content_Types].xml')
     if content_types is not None:
         ct_root = ET.fromstring(content_types)
-        CT_NS = 'http://schemas.openxmlformats.org/package/2006/content-types'
-        has_footer_ct = False
-        for ct in ct_root:
-            if ct.get('PartName') == '/word/footer1.xml':
-                has_footer_ct = True
-                break
+        has_footer_ct = any(ct.get('PartName') == '/word/footer1.xml' for ct in ct_root)
         if not has_footer_ct:
             footer_ct = ET.SubElement(ct_root, '{%s}Override' % CT_NS)
             footer_ct.set('PartName', '/word/footer1.xml')
             footer_ct.set('ContentType', 'application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml')
-            all_files['[Content_Types].xml'] = ET.tostring(ct_root, encoding='utf-8', xml_declaration=True)
+            all_files['[Content_Types].xml'] = serialize_with_default_ns(ct_root, CT_NS)
             print('  Updated [Content_Types].xml (footer1.xml registered)')
+        else:
+            print('  [Content_Types].xml 已注册 footer1.xml')
 
-    print('  [OK] Footer ready')
+    # document.xml：写入 sectPr 页面设置与 footerReference
+    document_key = 'word/document.xml'
+    if document_key not in all_files:
+        print(f'ERROR: reference.docx 缺少 {document_key}。')
+        sys.exit(1)
+    all_files[document_key] = apply_page_setup(all_files[document_key], footer_rid)
+    print(f'  [OK] sectPr: footerReference(r:id={footer_rid}) + pgSz(A4) + pgMar(2.5cm)')
+
+    print('  [OK] Footer and page setup ready')
 
     # ---- Step 3: 写回 ----
     print("\n[3/3] Writing reference.docx...")

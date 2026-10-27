@@ -45,6 +45,29 @@ def check_dependencies() -> bool:
     return ok
 
 
+def check_workspace_contract() -> None:
+    """检查 DSH 协作契约与技能目录；缺失只告警，不阻断初始化。"""
+    agents_md = PROJECT_ROOT / "AGENTS.md"
+    if agents_md.is_file():
+        print("  [OK] AGENTS.md")
+    else:
+        print("  [WARN] 缺少 AGENTS.md：DSH 会话不会自动加载协作契约")
+    # AGENTS.md：.dsh/skills 优先，.agents/skills 兼容
+    found = []
+    for skill_dir in (PROJECT_ROOT / ".dsh" / "skills", PROJECT_ROOT / ".agents" / "skills"):
+        if not skill_dir.is_dir():
+            continue
+        names = [item.name for item in sorted(skill_dir.iterdir())]
+        if names:
+            found.append((skill_dir, names))
+    if found:
+        for skill_dir, names in found:
+            relative = skill_dir.relative_to(PROJECT_ROOT).as_posix()
+            print(f"  [OK] {relative}/（{'、'.join(names)}）")
+    else:
+        print("  [WARN] 缺少 .dsh/skills/ 与 .agents/skills/：技能无法按需加载")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="初始化数学建模任务目录")
     parser.add_argument("--force", "-f", action="store_true", help="跳过确认并清空 output")
@@ -62,12 +85,15 @@ def main() -> int:
 
     print_header("MathModel 任务初始化")
     if not args.skip_deps:
-        print("[1/4] 检查依赖")
+        print("[1/5] 检查依赖")
         check_dependencies()
     else:
-        print("[1/4] 跳过依赖检查")
+        print("[1/5] 跳过依赖检查")
 
-    print("[2/4] 准备 output")
+    print("[2/5] 检查工作区契约")
+    check_workspace_contract()
+
+    print("[3/5] 准备 output")
     output.mkdir(parents=True, exist_ok=True)
     generated = [item for item in output.iterdir() if item.name != ".gitignore"]
     if generated and not args.keep_output:
@@ -89,7 +115,7 @@ def main() -> int:
     if not gitignore.exists():
         gitignore.write_text("# Generated task outputs\n*\n!.gitignore\n", encoding="utf-8")
 
-    print("[3/4] 准备 reference.docx")
+    print("[4/5] 准备 reference.docx")
     build_script = Path(__file__).with_name("build_reference.py")
     if args.keep_reference and reference.exists():
         print(f"  保留：{reference}")
@@ -100,10 +126,12 @@ def main() -> int:
     else:
         print(f"  模板较新，保留：{reference}")
 
-    print("[4/4] 初始化完成")
+    print("[5/5] 初始化完成")
     print(f"  input/: {len(list((PROJECT_ROOT / 'input').iterdir()))} 个文件")
     print(f"  output/: {output}")
-    print("  下一步：先运行 `python scripts/audit_project.py`，再运行 `python scripts/build_paper.py`")
+    print("  下一步：阅读 `AGENTS.md`（协作契约）与 `wiki.md`（完整工作流）")
+    print("  生成计划提示词：`python scripts/ai_assistant.py plan --print-prompt`")
+    print("  审计与构建：`python scripts/audit_project.py` → `python scripts/build_paper.py`")
     return 0
 
 

@@ -1,0 +1,93 @@
+{
+  "seed_policy": "fixed and disjoint train/evaluation seeds",
+  "certificates": {
+    "q3_n_points": 7,
+    "q3_cover_radius_m": 998.92,
+    "q3_cover_ok_under_1000m": true,
+    "q4_n_points": 31,
+    "q4_worst_angular_gap_deg": 149.96,
+    "q4_full_view_ok": true,
+    "detour_limit_m": 300.0
+  },
+  "q3": {
+    "training": {
+      "episodes": 600,
+      "first_100_search_mean_s": 2061.6,
+      "last_100_search_mean_s": 1893.0,
+      "learned_states": 1776
+    },
+    "rl": {
+      "trials": 35,
+      "full_clear_rate": 1.0,
+      "total_time_s": {
+        "min": 3082.6,
+        "p10": 3400.6,
+        "median": 3911.6,
+        "p90": 4333.0,
+        "max": 4532.9
+      },
+      "per_source_time_s": {
+        "p10": 253.2,
+        "median": 299.5,
+        "p90": 341.2
+      }
+    },
+    "fixed_route_baseline": {
+      "trials": 35,
+      "full_clear_rate": 1.0,
+      "total_time_s": {
+        "min": 3082.6,
+        "p10": 3400.6,
+        "median": 3911.6,
+        "p90": 4333.0,
+        "max": 4532.9
+      },
+      "per_source_time_s": {
+        "p10": 253.2,
+        "median": 299.5,
+        "p90": 341.2
+      }
+    }
+  },
+  "q4": {
+    "training": {
+      "episodes": 600,
+      "first_100_search_mean_s": 9255.8,
+      "last_100_search_mean_s": 8547.4,
+      "learned_states": 10728
+    },
+    "rl_mixed_sources": {
+      "trials": 35,
+      "full_clear_rate": 1.0,
+      "total_time_s": {
+        "min": 9067.4,
+        "p10": 9524.4,
+        "median": 9946.4,
+        "p90": 10755.8,
+        "max": 11856.1
+      },
+      "per_source_time_s": {
+        "p10": 645.0,
+        "median": 764.9,
+        "p90": 983.6
+      }
+    },
+    "rl_all_directional_stress": {
+      "trials": 35,
+      "full_clear_rate": 1.0,
+      "total_time_s": {
+        "min": 9364.7,
+        "p10": 9865.8,
+        "median": 10594.2,
+        "p90": 11205.0,
+        "max": 12514.6
+      },
+      "per_source_time_s": {
+        "p10": 677.0,
+        "median": 800.8,
+        "p90": 999.4
+      }
+    }
+  },
+  "wall_time_s": 10.49
+}

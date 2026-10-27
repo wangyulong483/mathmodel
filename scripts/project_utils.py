@@ -21,7 +21,7 @@ CONFIG_PATH = PROJECT_ROOT / "mathmodel.config.json"
 def load_config() -> dict[str, Any]:
     """Load the project configuration and apply environment overrides."""
     config: dict[str, Any] = {
-        "project_version": "4.0",
+        "project_version": "4.1",
         "competition": {},
         "paths": {},
         "ai": {},
